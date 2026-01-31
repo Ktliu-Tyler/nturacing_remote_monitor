@@ -1,0 +1,19 @@
+[Unit]
+Description=NTURT CAN Monitor Server - Remote Side
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Desktop/GUI_SC-dev
+ExecStart=/usr/bin/python3 /home/pi/Desktop/GUI_SC-dev/server_remote.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# 环境变量
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
