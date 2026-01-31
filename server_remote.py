@@ -186,7 +186,7 @@ class RemoteCANServer:
                     data = json.loads(message)
                     
                     if data['type'] == 'can_message':
-                        # 处理CAN消息
+                        # 处理单条CAN消息（向后兼容）
                         can_id = data['can_id']
                         can_data = bytes(data['data'])
                         bus_id = data.get('bus_id', 0)
@@ -200,10 +200,37 @@ class RemoteCANServer:
                         # 更新最后数据接收时间
                         self.last_data_time = time.time()
                         self.vehicle_connected = True
+                    
+                    elif data['type'] == 'can_batch':
+                        # 处理批量CAN消息
+                        messages = data.get('messages', [])
+                        if len(messages) > 0:
+                            # 只在第一次收到时打印
+                            if self.message_count == 0:
+                                print(f"[DEBUG] First batch received: {len(messages)} messages")
+                            
+                            for msg in messages:
+                                can_id = msg['can_id']
+                                can_data = bytes(msg['data'])
+                                bus_id = msg.get('bus_id', 0)
+                                
+                                # 创建模拟CAN消息对象
+                                mock_message = self.create_mock_can_message(can_id, can_data)
+                                self.process_can_message(mock_message)
+                                self.message_count += 1
+                                vehicle_clients[client_id]['message_count'] += 1
+                            
+                            # 更新最后数据接收时间
+                            self.last_data_time = time.time()
+                            self.vehicle_connected = True
                         
                     elif data['type'] == 'heartbeat':
                         # 更新心跳时间
                         vehicle_clients[client_id]['last_heartbeat'] = time.time()
+                        
+                        # 打印统计信息
+                        if 'dropped_messages' in data and data['dropped_messages'] > 0:
+                            print(f"Client {client_id}: Dropped {data['dropped_messages']} messages, Queue: {data.get('queue_size', 0)}")
                         
                 except json.JSONDecodeError:
                     print(f"Invalid JSON from {client_id}")
