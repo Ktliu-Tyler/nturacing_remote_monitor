@@ -55,6 +55,11 @@ class CANDataClient:
         self.mode = 'realtime'  # 'realtime' 或 'csv'
         self.csv_file = None
         self.csv_paused = False
+        self.csv_playback_speed = CSV_REPLAY_SPEED
+        self.csv_data = []  # 存儲CSV數據
+        self.csv_index = 0  # 當前回放索引
+        self.csv_start_time = None  # 回放開始時間
+        self.csv_base_timestamp = None  # CSV基準時間戳
         
     async def connect(self):
         """连接到服务器"""
@@ -144,6 +149,15 @@ class CANDataClient:
             'data': data_list,
             'timestamp': time.time()
         }
+        
+        # CSV回放模式下，跳过去重逻辑，直接加入队列
+        if self.mode == 'csv':
+            try:
+                self.message_queue.put_nowait(message_data)
+                return True
+            except asyncio.QueueFull:
+                self.dropped_messages += 1
+                return False
         
         # 如果使用单条发送模式（用于测试）
         if not USE_BATCH_MODE:
@@ -326,7 +340,8 @@ class CANDataClient:
         loop = asyncio.get_event_loop()
         while self.running:
             try:
-                if self.bus0 and self.websocket:
+                # 只在realtime模式下读取CAN
+                if self.mode == 'realtime' and self.bus0 and self.websocket:
                     # 使用线程池执行阻塞的recv调用
                     message = await loop.run_in_executor(
                         None,  # 使用默认线程池
@@ -347,81 +362,140 @@ class CANDataClient:
                 await asyncio.sleep(0.1)
     
     async def csv_replayer(self):
-        """从CSV文件回放CAN数据"""
+        """從CSV文件回放CAN數據（參考GUIvehical-v6實現）"""
         import csv
         
-        print(f"Starting CSV replay from: {self.csv_file}")
+        print(f"🎬 Starting CSV replay from: {self.csv_file}")
         
         try:
-            with open(self.csv_file, 'r') as f:
+            # 讀取所有CSV數據到記憶體
+            csv_data = []
+            with open(self.csv_file, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                
-                last_timestamp = None
-                start_time = time.time()
-                
                 for row in reader:
-                    if not self.running or self.mode != 'csv':
-                        print("CSV replay stopped")
-                        break
-                    
-                    # 暂停功能
-                    while self.csv_paused and self.running:
-                        await asyncio.sleep(0.1)
-                    
                     try:
-                        # 解析CSV数据
-                        timestamp = float(row.get('timestamp', 0))
-                        can_id = int(row.get('id', row.get('can_id', '0')), 16 if 'x' in str(row.get('id', row.get('can_id', '0'))) else 10)
+                        # 讀取timestamp（微秒）
+                        timestamp = int(row.get('Time Stamp', row.get('timestamp', 0)))
+                        # 讀取CAN ID（16進制）
+                        can_id = int(row.get('ID', row.get('id', row.get('can_id', '0'))), 16)
+                        # 讀取bus ID（預設0）
                         bus_id = int(row.get('bus', row.get('bus_id', 0)))
                         
-                        # 解析data字段
-                        data_str = row.get('data', '')
-                        if data_str:
-                            # 处理不同格式："01 02 03" 或 "[1,2,3]" 或 "010203"
-                            data_str = data_str.strip('[]').replace(',', ' ')
-                            data_bytes = bytes([int(x, 16) for x in data_str.split()])
-                        else:
-                            data_bytes = bytes()
+                        # 解析data字段（D1-D12格式）
+                        data = []
+                        for i in range(1, 13):
+                            data_key = f'D{i}'
+                            if data_key in row and row[data_key] != '' and row[data_key] is not None:
+                                try:
+                                    data_value = str(row[data_key]).strip()
+                                    if data_value:
+                                        data.append(int(data_value, 16))
+                                    else:
+                                        break
+                                except ValueError:
+                                    break
+                            else:
+                                break
                         
-                        # 时间同步回放
-                        if last_timestamp is not None:
-                            time_diff = (timestamp - last_timestamp) / CSV_REPLAY_SPEED
-                            if time_diff > 0:
-                                await asyncio.sleep(time_diff)
-                        
-                        last_timestamp = timestamp
-                        
-                        # 发送CAN消息
-                        await self.send_can_message(can_id, data_bytes, bus_id)
-                        
+                        csv_data.append({
+                            'timestamp': timestamp,
+                            'can_id': can_id,
+                            'bus_id': bus_id,
+                            'data': bytes(data)
+                        })
                     except Exception as e:
-                        print(f"Error parsing CSV row: {e}, row: {row}")
                         continue
+            
+            if not csv_data:
+                print("❌ No valid CSV data loaded")
+                return
+            
+            print(f"📁 Loaded {len(csv_data)} CAN messages from CSV")
+            
+            # 保存CSV數據到實例變量
+            self.csv_data = csv_data
+            
+            # 初始化回放參數
+            csv_index = 0
+            csv_start_time = None
+            csv_base_timestamp = csv_data[0]['timestamp']
+            
+            print(f"🕐 CSV時間範圍: {csv_base_timestamp} - {csv_data[-1]['timestamp']}")
+            print(f"⏱️ 預計回放時長: {(csv_data[-1]['timestamp'] - csv_base_timestamp) / 1000000:.2f} 秒")
+            
+            # 回放循環（類似GUIvehical-v6的csv_receive_callback邏輯）
+            while self.running and self.mode == 'csv':
+                # 暫停功能
+                if self.csv_paused:
+                    await asyncio.sleep(0.1)
+                    # 暫停時重置時間基準
+                    csv_start_time = None
+                    continue
                 
-                print("CSV replay completed")
-                # 回放完成后切换回实时模式
-                self.mode = 'realtime'
+                # 檢查是否回放完成
+                if csv_index >= len(csv_data):
+                    print(f"✅ CSV replay completed: {csv_index} rows processed")
+                    break
                 
-                # 通知服务器回放完成
-                if self.websocket:
-                    await self.websocket.send(json.dumps({
-                        'type': 'csv_status',
-                        'status': 'completed',
-                        'message': 'CSV replay completed'
-                    }))
+                # 初始化時間基準
+                current_time = time.time()
+                if csv_start_time is None:
+                    csv_start_time = current_time
+                    csv_base_timestamp = csv_data[csv_index]['timestamp']
                 
+                # 計算實際經過的時間（秒），使用實例變量的速度
+                elapsed_time = (current_time - csv_start_time) * self.csv_playback_speed
+                # 轉換為微秒並計算目標時間戳
+                target_timestamp = csv_base_timestamp + elapsed_time * 1000000
+                
+                # 更新當前索引到實例變量
+                self.csv_index = csv_index
+                self.csv_start_time = csv_start_time
+                self.csv_base_timestamp = csv_base_timestamp
+                
+                # 發送所有在目標時間戳之前的消息
+                updated = False
+                while (csv_index < len(csv_data) and 
+                       csv_data[csv_index]['timestamp'] <= target_timestamp):
+                    msg = csv_data[csv_index]
+                    await self.send_can_message(msg['can_id'], msg['data'], msg['bus_id'])
+                    csv_index += 1
+                    updated = True
+                    
+                    # 每1000行打印一次進度
+                    if csv_index % 1000 == 0:
+                        progress_pct = (csv_index / len(csv_data)) * 100
+                        elapsed_sec = (csv_data[csv_index]['timestamp'] - csv_data[0]['timestamp']) / 1000000
+                        print(f"📊 CSV replay: {csv_index}/{len(csv_data)} ({progress_pct:.1f}%) - {elapsed_sec:.2f}s")
+                
+                # 短暫休眠避免CPU空轉
+                await asyncio.sleep(0.001)
+            
+            # 通知服務器回放完成
+            if self.websocket:
+                await self.websocket.send(json.dumps({
+                    'type': 'csv_status',
+                    'status': 'completed',
+                    'message': f'CSV replay completed: {csv_index} rows',
+                    'row_count': csv_index
+                }))
+            
+            print("⏸️ CSV replay finished. Waiting for next command...")
+                
+        except FileNotFoundError:
+            print(f"❌ CSV file not found: {self.csv_file}")
         except Exception as e:
-            print(f"Error in CSV replayer: {e}")
+            print(f"❌ Error in CSV replayer: {e}")
             import traceback
             traceback.print_exc()
-            self.mode = 'realtime'
     
     async def read_can1(self):
         """读取CAN1数据"""
         loop = asyncio.get_event_loop()
         while self.running:
             try:
-                if self.bus1 and self.websocket:
+                # 只在realtime模式下读取CAN
+                if self.mode == 'realtime' and self.bus1 and self.websocket:
                     # 使用线程池执行阻塞的recv调用
                     message = await loop.run_in_executor(
                         None,  # 使用默认线程池
@@ -439,6 +513,42 @@ class CANDataClient:
                 break
             except Exception as e:
                 print(f"Error reading CAN1: {e}")
+                await asyncio.sleep(0.1)
+    
+    async def csv_monitor(self):
+        """监控CSV模式并启动replayer"""
+        csv_task = None
+        
+        while self.running:
+            try:
+                # 检查是否需要启动CSV replayer
+                if self.mode == 'csv' and self.csv_file and csv_task is None:
+                    print(f"✅ Starting CSV replayer task")
+                    csv_task = asyncio.create_task(self.csv_replayer())
+                
+                # 如果切换回realtime模式，取消CSV任务
+                elif self.mode == 'realtime' and csv_task is not None:
+                    print(f"❌ Stopping CSV replayer task")
+                    csv_task.cancel()
+                    try:
+                        await csv_task
+                    except asyncio.CancelledError:
+                        pass
+                    csv_task = None
+                
+                # 检查CSV任务是否完成
+                if csv_task and csv_task.done():
+                    print(f"✅ CSV replayer completed")
+                    csv_task = None
+                
+                await asyncio.sleep(0.1)
+                
+            except asyncio.CancelledError:
+                if csv_task:
+                    csv_task.cancel()
+                break
+            except Exception as e:
+                print(f"Error in CSV monitor: {e}")
                 await asyncio.sleep(0.1)
     
     async def command_receiver(self):
@@ -506,9 +616,87 @@ class CANDataClient:
                     }))
                 
                 elif cmd_type == 'csv_pause':
-                    # 暂停/恢复CSV回放
+                    # 暫停/恢復CSV回放
                     self.csv_paused = not self.csv_paused
                     print(f"CSV replay {'paused' if self.csv_paused else 'resumed'}")
+                
+                elif cmd_type == 'csv_jump_percentage':
+                    # 跳到指定百分比位置
+                    percentage = data.get('percentage', 0)
+                    if self.csv_data:
+                        percentage = max(0, min(100, percentage))
+                        target_index = int(len(self.csv_data) * percentage / 100)
+                        self.csv_index = target_index
+                        
+                        # 重置時間基準
+                        if self.csv_index < len(self.csv_data):
+                            self.csv_start_time = time.time()
+                            self.csv_base_timestamp = self.csv_data[self.csv_index]['timestamp']
+                        
+                        print(f"Jumped to {percentage}% ({self.csv_index}/{len(self.csv_data)})")
+                        
+                        await self.websocket.send(json.dumps({
+                            'type': 'csv_status',
+                            'status': 'jumped',
+                            'percentage': percentage,
+                            'index': self.csv_index
+                        }))
+                
+                elif cmd_type == 'csv_jump_time':
+                    # 前進或後退指定秒數
+                    seconds = data.get('seconds', 0)
+                    if self.csv_data and self.csv_start_time:
+                        current_timestamp = self.csv_data[self.csv_index]['timestamp'] if self.csv_index < len(self.csv_data) else self.csv_data[-1]['timestamp']
+                        target_timestamp = current_timestamp + (seconds * 1000000)
+                        
+                        # 找到最接近的索引
+                        target_index = self.csv_index
+                        if seconds > 0:  # 前進
+                            for i in range(self.csv_index, len(self.csv_data)):
+                                if self.csv_data[i]['timestamp'] >= target_timestamp:
+                                    target_index = i
+                                    break
+                            else:
+                                target_index = len(self.csv_data) - 1
+                        else:  # 後退
+                            for i in range(self.csv_index, -1, -1):
+                                if self.csv_data[i]['timestamp'] <= target_timestamp:
+                                    target_index = i
+                                    break
+                            else:
+                                target_index = 0
+                        
+                        self.csv_index = target_index
+                        self.csv_start_time = time.time()
+                        self.csv_base_timestamp = self.csv_data[self.csv_index]['timestamp']
+                        
+                        print(f"Jumped {seconds}s to index {self.csv_index}")
+                        
+                        await self.websocket.send(json.dumps({
+                            'type': 'csv_status',
+                            'status': 'jumped',
+                            'seconds': seconds,
+                            'index': self.csv_index
+                        }))
+                
+                elif cmd_type == 'csv_set_speed':
+                    # 設定回放速度
+                    speed = data.get('speed', 1.0)
+                    if speed > 0:
+                        # 調整時間基準點以保持連續性
+                        if self.csv_start_time and not self.csv_paused and self.csv_data:
+                            current_time = time.time()
+                            elapsed_time = (current_time - self.csv_start_time) * self.csv_playback_speed
+                            self.csv_start_time = current_time - (elapsed_time / speed)
+                        
+                        self.csv_playback_speed = speed
+                        print(f"Playback speed set to {speed}x")
+                        
+                        await self.websocket.send(json.dumps({
+                            'type': 'csv_status',
+                            'status': 'speed_changed',
+                            'speed': speed
+                        }))
                     
             except websockets.exceptions.ConnectionClosed:
                 break
@@ -544,17 +732,13 @@ class CANDataClient:
                 try:
                     # 创建并运行所有任务
                     tasks = [
+                        asyncio.create_task(self.read_can0()),
+                        asyncio.create_task(self.read_can1()),
                         asyncio.create_task(self.batch_sender()),
                         asyncio.create_task(self.heartbeat_loop()),
-                        asyncio.create_task(self.command_receiver())
+                        asyncio.create_task(self.command_receiver()),
+                        asyncio.create_task(self.csv_monitor())  # 监控CSV模式
                     ]
-                    
-                    # 根据模式添加数据源任务
-                    if self.mode == 'realtime':
-                        tasks.append(asyncio.create_task(self.read_can0()))
-                        tasks.append(asyncio.create_task(self.read_can1()))
-                    elif self.mode == 'csv' and self.csv_file:
-                        tasks.append(asyncio.create_task(self.csv_replayer()))
                     
                     # 等待任务完成或连接断开
                     done, pending = await asyncio.wait(

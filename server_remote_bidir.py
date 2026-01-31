@@ -1297,7 +1297,7 @@ async def switch_to_realtime():
 
 @app.post('/api/csv/pause')
 async def toggle_csv_pause():
-    """暂停/恢复CSV回放"""
+    """暫停/恢復CSV回放"""
     if not vehicle_clients:
         return {'error': 'No vehicle client connected'}
     
@@ -1309,6 +1309,69 @@ async def toggle_csv_pause():
             'type': 'csv_pause'
         }))
         return {'status': 'toggled'}
+    except Exception as e:
+        return {'error': str(e)}
+
+@app.post('/api/csv/jump_percentage')
+async def jump_to_percentage(request: Request):
+    """跳到指定百分比位置"""
+    data = await request.json()
+    percentage = data.get('percentage', 0)
+    
+    if not vehicle_clients:
+        return {'error': 'No vehicle client connected'}
+    
+    client_id = list(vehicle_clients.keys())[0]
+    websocket = vehicle_clients[client_id]['websocket']
+    
+    try:
+        await websocket.send(json.dumps({
+            'type': 'csv_jump_percentage',
+            'percentage': percentage
+        }))
+        return {'status': 'jumped', 'percentage': percentage}
+    except Exception as e:
+        return {'error': str(e)}
+
+@app.post('/api/csv/jump_time')
+async def jump_time(request: Request):
+    """前進或後退指定秒數"""
+    data = await request.json()
+    seconds = data.get('seconds', 0)
+    
+    if not vehicle_clients:
+        return {'error': 'No vehicle client connected'}
+    
+    client_id = list(vehicle_clients.keys())[0]
+    websocket = vehicle_clients[client_id]['websocket']
+    
+    try:
+        await websocket.send(json.dumps({
+            'type': 'csv_jump_time',
+            'seconds': seconds
+        }))
+        return {'status': 'jumped', 'seconds': seconds}
+    except Exception as e:
+        return {'error': str(e)}
+
+@app.post('/api/csv/set_speed')
+async def set_playback_speed(request: Request):
+    """設定回放速度"""
+    data = await request.json()
+    speed = data.get('speed', 1.0)
+    
+    if not vehicle_clients:
+        return {'error': 'No vehicle client connected'}
+    
+    client_id = list(vehicle_clients.keys())[0]
+    websocket = vehicle_clients[client_id]['websocket']
+    
+    try:
+        await websocket.send(json.dumps({
+            'type': 'csv_set_speed',
+            'speed': speed
+        }))
+        return {'status': 'speed_set', 'speed': speed}
     except Exception as e:
         return {'error': str(e)}
 
