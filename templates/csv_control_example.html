@@ -332,6 +332,7 @@
         }
 
         async function jumpToPercentage(percentage) {
+            console.log('Jumping to percentage:', percentage);
             try {
                 const response = await fetch('/api/csv/jump_percentage', {
                     method: 'POST',
@@ -341,15 +342,21 @@
                     body: JSON.stringify({ percentage: percentage })
                 });
                 const result = await response.json();
+                console.log('Jump result:', result);
                 if (result.error) {
                     console.error('Jump error:', result.error);
+                    updateStatus('Error: ' + result.error, 'error');
+                } else {
+                    updateStatus(`Jumped to ${percentage.toFixed(1)}%`, 'csv');
                 }
             } catch (error) {
                 console.error('Jump error:', error);
+                updateStatus('Error: ' + error.message, 'error');
             }
         }
 
         async function jumpTime(seconds) {
+            console.log('Jumping time:', seconds);
             try {
                 const response = await fetch('/api/csv/jump_time', {
                     method: 'POST',
@@ -359,6 +366,7 @@
                     body: JSON.stringify({ seconds: seconds })
                 });
                 const result = await response.json();
+                console.log('Jump time result:', result);
                 if (result.error) {
                     updateStatus('Error: ' + result.error, 'error');
                 } else {
@@ -370,6 +378,7 @@
         }
 
         async function setSpeed(speed) {
+            console.log('Setting speed:', speed);
             currentSpeed = speed;
             
             // 更新按鈕樣式
