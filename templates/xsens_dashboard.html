@@ -288,6 +288,34 @@
             color: #e2e8f0;
         }
         
+        .home-button {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: white;
+            backdrop-filter: blur(10px);
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.9) 0%, rgba(37, 99, 235, 0.9) 100%);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s ease;
+        }
+
+        .home-button:hover {
+            transform: scale(1.05);
+        }
+
+        .home-button svg {
+            width: 20px;
+            height: 20px;
+        }
+
         .connection-indicator {
             position: fixed;
             top: 20px;
@@ -454,6 +482,13 @@
     </style>
 </head>
 <body>
+    <!-- Home Button -->
+    <a href="/" class="home-button">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+        </svg>
+        <span>Home</span>
+    </a>
     <!-- Connection Indicator -->
     <div id="connection-status" class="connection-indicator disconnected">
         <span class="status-indicator"></span>

@@ -1011,7 +1011,11 @@ can_server = None
 
 # FastAPI Routes
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def main_navigation(request: Request):
+    return templates.TemplateResponse("main_navigation.html", {"request": request})
+
+@app.get("/racing", response_class=HTMLResponse)
+async def racing_dashboard(request: Request):
     return templates.TemplateResponse("enhanced_racing_dashboard.html", {"request": request})
 
 @app.get("/AMS", response_class=HTMLResponse)
