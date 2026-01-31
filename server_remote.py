@@ -204,25 +204,20 @@ class RemoteCANServer:
                     elif data['type'] == 'can_batch':
                         # 处理批量CAN消息
                         messages = data.get('messages', [])
-                        if len(messages) > 0:
-                            # 只在第一次收到时打印
-                            if self.message_count == 0:
-                                print(f"[DEBUG] First batch received: {len(messages)} messages")
+                        for msg in messages:
+                            can_id = msg['can_id']
+                            can_data = bytes(msg['data'])
+                            bus_id = msg.get('bus_id', 0)
                             
-                            for msg in messages:
-                                can_id = msg['can_id']
-                                can_data = bytes(msg['data'])
-                                bus_id = msg.get('bus_id', 0)
-                                
-                                # 创建模拟CAN消息对象
-                                mock_message = self.create_mock_can_message(can_id, can_data)
-                                self.process_can_message(mock_message)
-                                self.message_count += 1
-                                vehicle_clients[client_id]['message_count'] += 1
-                            
-                            # 更新最后数据接收时间
-                            self.last_data_time = time.time()
-                            self.vehicle_connected = True
+                            # 创建模拟CAN消息对象
+                            mock_message = self.create_mock_can_message(can_id, can_data)
+                            self.process_can_message(mock_message)
+                            self.message_count += 1
+                            vehicle_clients[client_id]['message_count'] += 1
+                        
+                        # 更新最后数据接收时间
+                        self.last_data_time = time.time()
+                        self.vehicle_connected = True
                         
                     elif data['type'] == 'heartbeat':
                         # 更新心跳时间
