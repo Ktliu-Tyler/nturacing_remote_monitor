@@ -1329,19 +1329,25 @@ async def jump_to_percentage(request: Request):
     data = await request.json()
     percentage = data.get('percentage', 0)
     
+    print(f"📍 API received jump_percentage: {percentage}%")
+    
     if not vehicle_clients:
+        print("❌ No vehicle client connected")
         return {'error': 'No vehicle client connected'}
     
     client_id = list(vehicle_clients.keys())[0]
     websocket = vehicle_clients[client_id]['websocket']
     
     try:
-        await websocket.send(json.dumps({
+        message = json.dumps({
             'type': 'csv_jump_percentage',
             'percentage': percentage
-        }))
+        })
+        print(f"📤 Sending to client: {message}")
+        await websocket.send(message)
         return {'status': 'jumped', 'percentage': percentage}
     except Exception as e:
+        print(f"❌ Send error: {e}")
         return {'error': str(e)}
 
 @app.post('/api/csv/jump_time')
@@ -1350,19 +1356,25 @@ async def jump_time(request: Request):
     data = await request.json()
     seconds = data.get('seconds', 0)
     
+    print(f"⏱️ API received jump_time: {seconds}s")
+    
     if not vehicle_clients:
+        print("❌ No vehicle client connected")
         return {'error': 'No vehicle client connected'}
     
     client_id = list(vehicle_clients.keys())[0]
     websocket = vehicle_clients[client_id]['websocket']
     
     try:
-        await websocket.send(json.dumps({
+        message = json.dumps({
             'type': 'csv_jump_time',
             'seconds': seconds
-        }))
+        })
+        print(f"📤 Sending to client: {message}")
+        await websocket.send(message)
         return {'status': 'jumped', 'seconds': seconds}
     except Exception as e:
+        print(f"❌ Send error: {e}")
         return {'error': str(e)}
 
 @app.post('/api/csv/set_speed')
@@ -1371,19 +1383,25 @@ async def set_playback_speed(request: Request):
     data = await request.json()
     speed = data.get('speed', 1.0)
     
+    print(f"⚡ API received set_speed: {speed}x")
+    
     if not vehicle_clients:
+        print("❌ No vehicle client connected")
         return {'error': 'No vehicle client connected'}
     
     client_id = list(vehicle_clients.keys())[0]
     websocket = vehicle_clients[client_id]['websocket']
     
     try:
-        await websocket.send(json.dumps({
+        message = json.dumps({
             'type': 'csv_set_speed',
             'speed': speed
-        }))
+        })
+        print(f"📤 Sending to client: {message}")
+        await websocket.send(message)
         return {'status': 'speed_set', 'speed': speed}
     except Exception as e:
+        print(f"❌ Send error: {e}")
         return {'error': str(e)}
 
 async def start_vehicle_data_server():

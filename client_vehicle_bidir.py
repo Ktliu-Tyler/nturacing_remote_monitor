@@ -581,6 +581,7 @@ class CANDataClient:
                 data = json.loads(message)
                 
                 cmd_type = data.get('type')
+                print(f"📥 Received command: {cmd_type}")  # 調試信息
                 
                 if cmd_type == 'request_csv_list':
                     # 服务器请求CSV文件列表
