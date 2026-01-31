@@ -468,6 +468,23 @@ class CANDataClient:
                         elapsed_sec = (csv_data[csv_index]['timestamp'] - csv_data[0]['timestamp']) / 1000000
                         print(f"📊 CSV replay: {csv_index}/{len(csv_data)} ({progress_pct:.1f}%) - {elapsed_sec:.2f}s")
                 
+                # 每0.5秒發送一次進度更新給server
+                if updated and time.time() - getattr(self, '_last_progress_update', 0) > 0.5:
+                    self._last_progress_update = time.time()
+                    if self.websocket:
+                        progress_pct = (csv_index / len(csv_data)) * 100
+                        current_sec = (csv_data[csv_index]['timestamp'] - csv_data[0]['timestamp']) / 1000000
+                        total_sec = (csv_data[-1]['timestamp'] - csv_data[0]['timestamp']) / 1000000
+                        
+                        await self.websocket.send(json.dumps({
+                            'type': 'csv_progress',
+                            'percentage': progress_pct,
+                            'current_time': current_sec,
+                            'total_time': total_sec,
+                            'current_index': csv_index,
+                            'total_count': len(csv_data)
+                        }))
+                
                 # 短暫休眠避免CPU空轉
                 await asyncio.sleep(0.001)
             

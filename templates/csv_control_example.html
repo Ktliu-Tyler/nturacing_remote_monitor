@@ -239,9 +239,37 @@
                            data.mode === 'realtime' ? 'realtime' : 'csv');
             } else if (data.type === 'csv_status') {
                 updateStatus(data.message, 'csv');
+            } else if (data.type === 'csv_progress') {
+                updateProgress(data);
             } else if (data.type === 'error') {
                 updateStatus('Error: ' + data.message, 'error');
             }
+        }
+
+        // 更新進度顯示
+        function updateProgress(data) {
+            if (isDragging) return; // 拖動時不更新
+            
+            const percentage = data.percentage || 0;
+            const currentTime = data.current_time || 0;
+            const totalTime = data.total_time || 0;
+            
+            // 更新進度條
+            const thumb = document.getElementById('timelineThumb');
+            const progress = document.getElementById('timelineProgress');
+            thumb.style.left = percentage + '%';
+            progress.style.width = percentage + '%';
+            
+            // 更新時間顯示
+            document.getElementById('currentTime').textContent = formatTime(currentTime);
+            document.getElementById('totalTime').textContent = formatTime(totalTime);
+        }
+
+        // 格式化時間（秒轉為 mm:ss）
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         }
 
         // 時間軸拖動功能
