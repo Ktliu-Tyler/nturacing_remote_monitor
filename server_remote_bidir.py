@@ -268,50 +268,7 @@ class RemoteCANServer:
                         await self.broadcast_to_web({
                             'type': 'error',
                             'message': data.get('message')
-                        })try:
-                    data = json.loads(message)
-                    
-                    if data['type'] == 'can_message':
-                        # 处理单条CAN消息（向后兼容）
-                        can_id = data['can_id']
-                        can_data = bytes(data['data'])
-                        bus_id = data.get('bus_id', 0)
-                        
-                        # 创建模拟CAN消息对象
-                        mock_message = self.create_mock_can_message(can_id, can_data)
-                        self.process_can_message(mock_message)
-                        self.message_count += 1
-                        vehicle_clients[client_id]['message_count'] += 1
-                        
-                        # 更新最后数据接收时间
-                        self.last_data_time = time.time()
-                        self.vehicle_connected = True
-                    
-                    elif data['type'] == 'can_batch':
-                        # 处理批量CAN消息
-                        messages = data.get('messages', [])
-                        for msg in messages:
-                            can_id = msg['can_id']
-                            can_data = bytes(msg['data'])
-                            bus_id = msg.get('bus_id', 0)
-                            
-                            # 创建模拟CAN消息对象
-                            mock_message = self.create_mock_can_message(can_id, can_data)
-                            self.process_can_message(mock_message)
-                            self.message_count += 1
-                            vehicle_clients[client_id]['message_count'] += 1
-                        
-                        # 更新最后数据接收时间
-                        self.last_data_time = time.time()
-                        self.vehicle_connected = True
-                        
-                    elif data['type'] == 'heartbeat':
-                        # 更新心跳时间
-                        vehicle_clients[client_id]['last_heartbeat'] = time.time()
-                        
-                        # 打印统计信息
-                        if 'dropped_messages' in data and data['dropped_messages'] > 0:
-                            print(f"Client {client_id}: Dropped {data['dropped_messages']} messages, Queue: {data.get('queue_size', 0)}")
+                        })
                         
                 except json.JSONDecodeError:
                     print(f"Invalid JSON from {client_id}")
@@ -1108,7 +1065,11 @@ can_server = None
 
 # FastAPI Routes
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def main_navigation(request: Request):
+    return templates.TemplateResponse("main_navigation.html", {"request": request})
+
+@app.get("/racing", response_class=HTMLResponse)
+async def racing_dashboard(request: Request):
     return templates.TemplateResponse("enhanced_racing_dashboard.html", {"request": request})
 
 @app.get("/AMS", response_class=HTMLResponse)
@@ -1240,9 +1201,88 @@ async def select_csv_file(request: Request):
 
 @app.post('/api/csv/switch_realtime')
 async def switch_to_realtime():
-    """切换回实时模式"""
+    """切換回實時模式並清空buffer"""
     if not vehicle_clients:
         return {'error': 'No vehicle client connected'}
+    
+    # 清空所有數據buffer
+    if can_server:
+        print("🧹 Clearing data buffer before switching to realtime mode...")
+        
+        # 重置所有數據為None
+        can_server.data_store['timestamp']['time'] = None
+        can_server.data_store['timestamp']['last_update'] = None
+        
+        can_server.data_store['gps'] = {
+            'lat': None, 'lon': None, 'alt': None, 'status': None,
+            'last_update': None
+        }
+        
+        can_server.data_store['velocity'] = {
+            'linear_x': None, 'linear_y': None, 'linear_z': None,
+            'angular_x': None, 'angular_y': None, 'angular_z': None,
+            'magnitude': None, 'speed_kmh': None,
+            'last_update': None
+        }
+        
+        can_server.data_store['distance'] = {
+            'trip_distance_km': None,
+            'last_update': None
+        }
+        
+        can_server.data_store['accumulator'] = {
+            'soc': None, 'voltage': None, 'current': None, 'temperature': None,
+            'status': None, 'heartbeat': None, 'capacity': None,
+            'cell_voltages': [None] * 105, 'cell_temperatures': [None] * 224,
+            'last_update': None
+        }
+        
+        for inv_num in [1, 2, 3, 4]:
+            can_server.data_store['inverters'][inv_num] = {
+                'name': can_server.data_store['inverters'][inv_num]['name'],
+                'status': None, 'torque': None, 'speed': None,
+                'control_word': None, 'target_torque': None,
+                'dc_voltage': None, 'dc_current': None,
+                'mos_temp': None, 'mcu_temp': None, 'motor_temp': None,
+                'heartbeat': None, 'last_update': None
+            }
+        
+        can_server.data_store['vcu'] = {
+            'steer': None, 'accel': None, 'apps1': None,    
+            'apps2': None, 'brake': None, 'bse1': None, 'bse2': None,
+            'suspF': None, 'suspR': None,
+            'last_update': None
+        }
+        
+        can_server.data_store['imu'] = {
+            'accel_km6': {'x': None, 'y': None, 'z': None},
+            'accel_km308': {'x': None, 'y': None, 'z': None},
+            'gyro': {'x': None, 'y': None, 'z': None},
+            'euler': {'roll': None, 'pitch': None, 'yaw': None},
+            'mag': {'x': None, 'y': None, 'z': None},
+            'last_update': None
+        }
+        
+        can_server.data_store['imu2'] = {
+            'accel': {'x': None, 'y': None, 'z': None},
+            'gyro': {'x': None, 'y': None, 'z': None},
+            'quaternion': {'w': None, 'x': None, 'y': None, 'z': None},
+            'last_update': None
+        }
+        
+        can_server.data_store['xsens'] = {
+            'quaternion': {'q0': None, 'q1': None, 'q2': None, 'q3': None},
+            'delta_v': {'x': None, 'y': None, 'z': None, 'exponent': None},
+            'rate_of_turn': {'gyr_x': None, 'gyr_y': None, 'gyr_z': None},
+            'delta_q': {'dq0': None, 'dq1': None, 'dq2': None, 'dq3': None},
+            'acceleration': {'acc_x': None, 'acc_y': None, 'acc_z': None},
+            'magnetic_field': {'mag_x': None, 'mag_y': None, 'mag_z': None},
+            'gps': {'lat': None, 'lon': None, 'alt': None},
+            'velocity': {'vel_x': None, 'vel_y': None, 'vel_z': None},
+            'last_update': None
+        }
+        
+        print("✅ Data buffer cleared")
     
     client_id = list(vehicle_clients.keys())[0]
     websocket = vehicle_clients[client_id]['websocket']
@@ -1251,7 +1291,7 @@ async def switch_to_realtime():
         await websocket.send(json.dumps({
             'type': 'switch_realtime'
         }))
-        return {'status': 'switched'}
+        return {'status': 'switched', 'buffer_cleared': True}
     except Exception as e:
         return {'error': str(e)}
 
