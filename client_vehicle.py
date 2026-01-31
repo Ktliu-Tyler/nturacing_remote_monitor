@@ -39,6 +39,10 @@ class CANDataClient:
         self.sent_batches = 0
         self.last_send_report = time.time()
         
+        # 去重统计
+        self.total_can_received = 0  # 从CAN收到的总消息数
+        self.filtered_duplicates = 0  # 被过滤的重复消息数
+        
         # 最新消息缓存 - 用于去重
         # key: (bus_id, can_id), value: message_data
         self.latest_messages = {}
@@ -92,6 +96,8 @@ class CANDataClient:
     
     async def send_can_message(self, can_id, data, bus_id):
         """将CAN消息加入队列（智能策略：数据相同去重，不同则保留）"""
+        self.total_can_received += 1
+        
         message_key = (bus_id, can_id)
         data_list = list(data)
         message_data = {
@@ -119,7 +125,7 @@ class CANDataClient:
                     return False
             return False
         
-        # 批量模式（原逻辑）
+        # 批量模式 - 智能去重
         should_queue = False
         async with self.cache_lock:
             # 检查是否是新数据
@@ -129,8 +135,9 @@ class CANDataClient:
                 if old_data != data_list:
                     should_queue = True
                     self.latest_messages[message_key] = message_data
-                # 数据相同则只更新时间戳，不重复加入队列
+                # 数据相同则只更新时间戳，不重复加入队列（这就是去重！）
                 else:
+                    self.filtered_duplicates += 1
                     self.latest_messages[message_key]['timestamp'] = message_data['timestamp']
             else:
                 # 新的CAN ID，加入队列
@@ -156,12 +163,19 @@ class CANDataClient:
             return
         
         try:
+            filter_rate = 0
+            if self.total_can_received > 0:
+                filter_rate = (self.filtered_duplicates / self.total_can_received) * 100
+            
             heartbeat_data = {
                 'type': 'heartbeat',
                 'timestamp': time.time(),
                 'message_count': self.message_count,
                 'dropped_messages': self.dropped_messages,
-                'queue_size': self.message_queue.qsize()
+                'queue_size': self.message_queue.qsize(),
+                'total_received': self.total_can_received,
+                'filtered': self.filtered_duplicates,
+                'filter_rate': f"{filter_rate:.1f}%"
             }
             await self.websocket.send(json.dumps(heartbeat_data))
             self.last_heartbeat = time.time()
@@ -174,16 +188,12 @@ class CANDataClient:
     async def batch_sender(self):
         """批量发送消息到服务器（保留所有数据变化）"""
         try:
-            print("=== Batch sender task starting ===", flush=True)
             batch = []
             last_send_time = time.time()
             
             # 等待websocket连接建立
             while self.running and not self.websocket:
-                print("Batch sender: Waiting for websocket connection...", flush=True)
                 await asyncio.sleep(0.1)
-            
-            print("Batch sender: Active and ready to send", flush=True)
             
             # 主发送循环
             while self.running:
@@ -222,7 +232,10 @@ class CANDataClient:
                                 
                                 # 定期报告发送状态
                                 if time.time() - self.last_send_report > 5:
-                                    print(f"Sent {self.sent_batches} batches, {self.message_count} messages, Queue: {self.message_queue.qsize()}")
+                                    filter_rate = 0
+                                    if self.total_can_received > 0:
+                                        filter_rate = (self.filtered_duplicates / self.total_can_received) * 100
+                                    print(f"📊 Sent: {self.message_count} msgs | Received: {self.total_can_received} | Filtered: {filter_rate:.1f}% | Queue: {self.message_queue.qsize()}")
                                     self.last_send_report = time.time()
                             except Exception as send_err:
                                 print(f"Error sending batch: {send_err}")
@@ -342,25 +355,12 @@ class CANDataClient:
             if await self.connect():
                 try:
                     # 创建并运行所有任务
-                    print("Creating tasks...", flush=True)
-                    task_can0 = asyncio.create_task(self.read_can0())
-                    print("CAN0 task created", flush=True)
-                    task_can1 = asyncio.create_task(self.read_can1())
-                    print("CAN1 task created", flush=True)
-                    task_sender = asyncio.create_task(self.batch_sender())
-                    print("Batch sender task created", flush=True)
-                    task_heartbeat = asyncio.create_task(self.heartbeat_loop())
-                    print("Heartbeat task created", flush=True)
-                    
-                    tasks = [task_can0, task_can1, task_sender, task_heartbeat]
-                    print(f"All tasks created and added to list", flush=True)
-                    
-                    # 短暂延迟让任务启动
-                    await asyncio.sleep(0.1)
-                    print(f"After 0.1s delay, checking task states...", flush=True)
-                    for i, task in enumerate(tasks):
-                        if task.done():
-                            print(f"Task {i} already done! Exception: {task.exception()}", flush=True)
+                    tasks = [
+                        asyncio.create_task(self.read_can0()),
+                        asyncio.create_task(self.read_can1()),
+                        asyncio.create_task(self.batch_sender()),
+                        asyncio.create_task(self.heartbeat_loop())
+                    ]
                     
                     # 等待任务完成或连接断开
                     done, pending = await asyncio.wait(
