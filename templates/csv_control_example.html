@@ -70,6 +70,82 @@
         .status-realtime { background: #d4edda; color: #155724; }
         .status-csv { background: #fff3cd; color: #856404; }
         .status-error { background: #f8d7da; color: #721c24; }
+        
+        /* 時間軸樣式 */
+        .timeline-container {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        
+        .timeline-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e0e0e0;
+            cursor: pointer;
+            position: relative;
+            margin: 20px 0;
+        }
+        
+        .timeline-progress {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.1s;
+        }
+        
+        .timeline-thumb {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            background: #007bff;
+            border: 3px solid white;
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            left: 0%;
+        }
+        
+        .timeline-thumb:active {
+            cursor: grabbing;
+        }
+        
+        .timeline-time {
+            display: flex;
+            justify-content: space-between;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .speed-btn {
+            padding: 5px 15px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+        
+        .speed-btn.active {
+            background: #007bff;
+            color: white;
+        }
+        
+        .jump-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
@@ -86,6 +162,39 @@
         </div>
     </div>
     
+    <!-- 時間軸控制 -->
+    <div class="control-panel">
+        <h2>⏱️ Timeline Control</h2>
+        
+        <div class="timeline-container">
+            <div class="timeline-time">
+                <span id="currentTime">00:00</span>
+                <span id="totalTime">00:00</span>
+            </div>
+            
+            <div class="timeline-slider" id="timelineSlider">
+                <div class="timeline-progress" id="timelineProgress"></div>
+                <div class="timeline-thumb" id="timelineThumb"></div>
+            </div>
+            
+            <div class="speed-control">
+                <span><strong>速度:</strong></span>
+                <button class="speed-btn" onclick="setSpeed(0.5)">0.5x</button>
+                <button class="speed-btn active" onclick="setSpeed(1)">1x</button>
+                <button class="speed-btn" onclick="setSpeed(2)">2x</button>
+                <button class="speed-btn" onclick="setSpeed(5)">5x</button>
+                <button class="speed-btn" onclick="setSpeed(10)">10x</button>
+            </div>
+            
+            <div class="jump-controls">
+                <button class="btn-primary" onclick="jumpTime(-10)">⏪ -10s</button>
+                <button class="btn-primary" onclick="jumpTime(-5)">◀️ -5s</button>
+                <button class="btn-primary" onclick="jumpTime(5)">▶️ +5s</button>
+                <button class="btn-primary" onclick="jumpTime(10)">⏩ +10s</button>
+            </div>
+        </div>
+    </div>
+    
     <div class="control-panel">
         <h2>CSV Files</h2>
         <div id="fileList">
@@ -96,6 +205,8 @@
     <script>
         let selectedFile = null;
         let ws = null;
+        let isDragging = false;
+        let currentSpeed = 1;
 
         // WebSocket连接
         function connectWebSocket() {
@@ -130,6 +241,131 @@
                 updateStatus(data.message, 'csv');
             } else if (data.type === 'error') {
                 updateStatus('Error: ' + data.message, 'error');
+            }
+        }
+
+        // 時間軸拖動功能
+        function initTimelineControl() {
+            const slider = document.getElementById('timelineSlider');
+            const thumb = document.getElementById('timelineThumb');
+            const progress = document.getElementById('timelineProgress');
+
+            function updatePosition(clientX) {
+                const rect = slider.getBoundingClientRect();
+                let percentage = ((clientX - rect.left) / rect.width) * 100;
+                percentage = Math.max(0, Math.min(100, percentage));
+                
+                thumb.style.left = percentage + '%';
+                progress.style.width = percentage + '%';
+                
+                return percentage;
+            }
+
+            function handleDragStart(e) {
+                isDragging = true;
+                e.preventDefault();
+            }
+
+            function handleDrag(e) {
+                if (!isDragging) return;
+                e.preventDefault();
+                
+                const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+                updatePosition(clientX);
+            }
+
+            function handleDragEnd(e) {
+                if (!isDragging) return;
+                isDragging = false;
+                
+                const clientX = e.type.includes('touch') ? e.changedTouches[0].clientX : e.clientX;
+                const percentage = updatePosition(clientX);
+                
+                // 發送跳轉請求
+                jumpToPercentage(percentage);
+            }
+
+            // 點擊時間軸跳轉
+            slider.addEventListener('click', (e) => {
+                if (e.target === thumb) return;
+                const percentage = updatePosition(e.clientX);
+                jumpToPercentage(percentage);
+            });
+
+            // 拖動控制
+            thumb.addEventListener('mousedown', handleDragStart);
+            thumb.addEventListener('touchstart', handleDragStart);
+            
+            document.addEventListener('mousemove', handleDrag);
+            document.addEventListener('touchmove', handleDrag);
+            
+            document.addEventListener('mouseup', handleDragEnd);
+            document.addEventListener('touchend', handleDragEnd);
+        }
+
+        async function jumpToPercentage(percentage) {
+            try {
+                const response = await fetch('/api/csv/jump_percentage', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ percentage: percentage })
+                });
+                const result = await response.json();
+                if (result.error) {
+                    console.error('Jump error:', result.error);
+                }
+            } catch (error) {
+                console.error('Jump error:', error);
+            }
+        }
+
+        async function jumpTime(seconds) {
+            try {
+                const response = await fetch('/api/csv/jump_time', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ seconds: seconds })
+                });
+                const result = await response.json();
+                if (result.error) {
+                    updateStatus('Error: ' + result.error, 'error');
+                } else {
+                    updateStatus(`Jumped ${seconds > 0 ? '+' : ''}${seconds}s`, 'csv');
+                }
+            } catch (error) {
+                updateStatus('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function setSpeed(speed) {
+            currentSpeed = speed;
+            
+            // 更新按鈕樣式
+            document.querySelectorAll('.speed-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            try {
+                const response = await fetch('/api/csv/set_speed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ speed: speed })
+                });
+                const result = await response.json();
+                if (result.error) {
+                    updateStatus('Error: ' + result.error, 'error');
+                } else {
+                    updateStatus(`Speed set to ${speed}x`, 'csv');
+                }
+            } catch (error) {
+                updateStatus('Error: ' + error.message, 'error');
             }
         }
 
@@ -235,6 +471,7 @@
 
         // 初始化
         connectWebSocket();
+        initTimelineControl();
     </script>
 </body>
 </html>
