@@ -262,6 +262,17 @@ class RemoteCANServer:
                             'message': data.get('message')
                         })
                     
+                    elif data['type'] == 'csv_progress':
+                        # CSV回放進度更新
+                        await self.broadcast_to_web({
+                            'type': 'csv_progress',
+                            'percentage': data.get('percentage', 0),
+                            'current_time': data.get('current_time', 0),
+                            'total_time': data.get('total_time', 0),
+                            'current_index': data.get('current_index', 0),
+                            'total_count': data.get('total_count', 0)
+                        })
+                    
                     elif data['type'] == 'error':
                         # 错误消息
                         print(f"Error from client: {data.get('message')}")
