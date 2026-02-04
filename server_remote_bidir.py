@@ -1085,7 +1085,7 @@ async def racing_dashboard(request: Request):
 
 @app.get("/AMS", response_class=HTMLResponse)
 async def ams_dashboard(request: Request):
-    return templates.TemplateResponse("battery_dashboard_update.html", {"request": request})
+    return templates.TemplateResponse("battery_dashboard _update.html", {"request": request})
 
 @app.get("/TQ", response_class=HTMLResponse)
 async def tq_dashboard(request: Request):
