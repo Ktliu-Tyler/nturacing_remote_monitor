@@ -1109,7 +1109,7 @@ async def xsens_dashboard(request: Request):
 
 @app.get("/csv_control", response_class=HTMLResponse)
 async def csv_control(request: Request):
-    return templates.TemplateResponse("csv_control_example.html", {"request": request})
+    return templates.TemplateResponse("csv_control.html", {"request": request})
 
 @app.get("/csv_debug", response_class=HTMLResponse)
 async def csv_debug(request: Request):
