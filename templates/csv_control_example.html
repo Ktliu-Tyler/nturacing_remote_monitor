@@ -234,9 +234,18 @@
         function handleServerMessage(data) {
             console.log('[DEBUG] Received message:', data.type, data);
             if (data.type === 'csv_files') {
-                console.log('[DEBUG] Displaying', data.files.length, 'CSV files');
-                displayCSVFiles(data.files);
-                updateStatus(`Received ${data.files.length} CSV files`, 'csv');
+                console.log('[DEBUG] csv_files message received');
+                console.log('[DEBUG] data.files:', data.files);
+                console.log('[DEBUG] files is array:', Array.isArray(data.files));
+                console.log('[DEBUG] files length:', data.files ? data.files.length : 'undefined');
+                
+                if (data.files && Array.isArray(data.files)) {
+                    displayCSVFiles(data.files);
+                    updateStatus(`Received ${data.files.length} CSV files`, 'csv');
+                } else {
+                    console.error('[ERROR] data.files is not a valid array:', data.files);
+                    updateStatus('Error: Invalid file list received', 'error');
+                }
             } else if (data.type === 'mode_changed') {
                 updateStatus(`Mode: ${data.mode}${data.file ? ' - ' + data.file : ''}`, 
                            data.mode === 'realtime' ? 'realtime' : 'csv');
@@ -431,21 +440,46 @@
         }
 
         function displayCSVFiles(files) {
-            console.log('[DEBUG] displayCSVFiles called with', files.length, 'files');
+            console.log('[DEBUG] displayCSVFiles called');
+            console.log('[DEBUG] files parameter:', files);
+            console.log('[DEBUG] files type:', typeof files);
+            console.log('[DEBUG] files is array:', Array.isArray(files));
+            
             const fileList = document.getElementById('fileList');
+            console.log('[DEBUG] fileList element:', fileList);
+            
+            if (!fileList) {
+                console.error('[ERROR] fileList element not found!');
+                return;
+            }
+            
+            if (!files || !Array.isArray(files)) {
+                console.error('[ERROR] files is not a valid array');
+                fileList.innerHTML = '<p style="color: red;">Error: Invalid file list</p>';
+                return;
+            }
             
             if (files.length === 0) {
+                console.log('[DEBUG] No files to display');
                 fileList.innerHTML = '<p>No CSV files found</p>';
                 return;
             }
             
-            fileList.innerHTML = files.map(file => `
-                <div class="file-item" onclick="selectFile('${file.filename}')">
-                    <strong>${file.filename}</strong><br>
-                    Size: ${file.size_mb} MB | Modified: ${new Date(file.modified).toLocaleString()}
-                </div>
-            `).join('');
-            console.log('[DEBUG] File list displayed');
+            console.log('[DEBUG] Creating HTML for', files.length, 'files');
+            console.log('[DEBUG] First file:', files[0]);
+            
+            try {
+                fileList.innerHTML = files.map(file => `
+                    <div class="file-item" onclick="selectFile('${file.filename}')">
+                        <strong>${file.filename}</strong><br>
+                        Size: ${file.size_mb} MB | Modified: ${new Date(file.modified).toLocaleString()}
+                    </div>
+                `).join('');
+                console.log('[DEBUG] File list HTML updated successfully');
+            } catch (error) {
+                console.error('[ERROR] Failed to create file list HTML:', error);
+                fileList.innerHTML = '<p style="color: red;">Error displaying files</p>';
+            }
         }
 
         async function selectFile(filename) {
