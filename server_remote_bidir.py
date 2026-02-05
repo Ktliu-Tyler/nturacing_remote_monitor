@@ -231,15 +231,19 @@ class RemoteCANServer:
                     
                     elif data['type'] == 'csv_list':
                         # 接收CSV文件列表
-                        print(f"Received CSV file list: {data.get('count', 0)} files")
+                        files_count = data.get('count', 0)
+                        print(f"[DEBUG] Received CSV file list: {files_count} files")
+                        print(f"[DEBUG] Files: {[f.get('filename', 'unknown') for f in data.get('files', [])[:5]]}")
                         vehicle_clients[client_id]['csv_files'] = data.get('files', [])
                         
                         # 广播到所有web客户端
+                        print(f"[DEBUG] Broadcasting to {len(web_connections)} web clients")
                         await self.broadcast_to_web({
                             'type': 'csv_files',
                             'files': data.get('files', []),
                             'client_id': client_id
                         })
+                        print("[DEBUG] Broadcast completed")
                     
                     elif data['type'] == 'mode_changed':
                         # 模式切换确认
@@ -1107,6 +1111,10 @@ async def xsens_dashboard(request: Request):
 async def csv_control(request: Request):
     return templates.TemplateResponse("csv_control_example.html", {"request": request})
 
+@app.get("/csv_debug", response_class=HTMLResponse)
+async def csv_debug(request: Request):
+    return templates.TemplateResponse("csv_debug.html", {"request": request})
+
 @app.get('/api/data')
 async def get_data():
     if can_server:
@@ -1171,19 +1179,26 @@ async def get_status():
 @app.post('/api/csv/request_list')
 async def request_csv_list():
     """请求车辆端发送CSV文件列表"""
+    print(f"[DEBUG] CSV list requested. Vehicle clients: {len(vehicle_clients)}")
+    
     if not vehicle_clients:
+        print("[ERROR] No vehicle client connected")
         return {'error': 'No vehicle client connected'}
     
     # 发送命令到第一个连接的车辆客户端
     client_id = list(vehicle_clients.keys())[0]
     websocket = vehicle_clients[client_id]['websocket']
     
+    print(f"[DEBUG] Sending request_csv_list to client: {client_id}")
+    
     try:
         await websocket.send(json.dumps({
             'type': 'request_csv_list'
         }))
-        return {'status': 'requested'}
+        print("[DEBUG] Request sent successfully")
+        return {'status': 'requested', 'client_id': client_id}
     except Exception as e:
+        print(f"[ERROR] Failed to send request: {e}")
         return {'error': str(e)}
 
 @app.post('/api/csv/select')

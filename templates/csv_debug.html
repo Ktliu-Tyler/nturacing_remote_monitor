@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSV Control Debug</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            margin: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4ec9b0;
+        }
+        .section {
+            background: #252526;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border: 1px solid #3e3e42;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            background: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        .log {
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #3e3e42;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid transparent;
+        }
+        .log-debug { border-left-color: #4ec9b0; color: #4ec9b0; }
+        .log-info { border-left-color: #569cd6; color: #569cd6; }
+        .log-success { border-left-color: #4ec9b0; color: #4ec9b0; }
+        .log-error { border-left-color: #f48771; color: #f48771; }
+        .log-warning { border-left-color: #dcdcaa; color: #dcdcaa; }
+        .status-box {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status-connected { background: #0e639c; }
+        .status-disconnected { background: #f48771; }
+        #fileList {
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #3e3e42;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .file-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .file-item:hover {
+            background: #2d2d30;
+        }
+        .timestamp {
+            color: #858585;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 CSV Control Debug Tool</h1>
+        
+        <div class="section">
+            <h2>Connection Status</h2>
+            <div id="wsStatus" class="status-box status-disconnected">WebSocket: Disconnected</div>
+            <div id="serverStatus" class="status-box">Server Status: Unknown</div>
+        </div>
+
+        <div class="section">
+            <h2>Actions</h2>
+            <button onclick="testConnection()">🔌 Test Connection</button>
+            <button onclick="getServerStatus()">📊 Get Server Status</button>
+            <button onclick="requestCSVList()">📁 Request CSV List</button>
+            <button onclick="clearLog()">🗑️ Clear Log</button>
+        </div>
+
+        <div class="section">
+            <h2>CSV Files</h2>
+            <div id="fileList">
+                <p style="color: #858585;">No files loaded yet. Click "Request CSV List" to fetch files.</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Debug Log</h2>
+            <div id="log" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let logCount = 0;
+
+        function log(message, type = 'info') {
+            logCount++;
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString() + '.' + new Date().getMilliseconds();
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type}]`, message);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            logCount = 0;
+            log('Log cleared', 'info');
+        }
+
+        function updateWSStatus(connected) {
+            const statusDiv = document.getElementById('wsStatus');
+            if (connected) {
+                statusDiv.textContent = 'WebSocket: Connected ✓';
+                statusDiv.className = 'status-box status-connected';
+            } else {
+                statusDiv.textContent = 'WebSocket: Disconnected ✗';
+                statusDiv.className = 'status-box status-disconnected';
+            }
+        }
+
+        function connectWebSocket() {
+            log('Attempting WebSocket connection...', 'debug');
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port}/ws`;
+            
+            log(`Connecting to: ${wsUrl}`, 'debug');
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    log('✓ WebSocket connection established!', 'success');
+                    updateWSStatus(true);
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    log(`← Received message type: ${data.type}`, 'info');
+                    handleServerMessage(data);
+                };
+                
+                ws.onerror = (error) => {
+                    log(`✗ WebSocket error: ${error}`, 'error');
+                    console.error('WebSocket error:', error);
+                };
+                
+                ws.onclose = () => {
+                    log('WebSocket connection closed', 'warning');
+                    updateWSStatus(false);
+                    log('Reconnecting in 3 seconds...', 'debug');
+                    setTimeout(connectWebSocket, 3000);
+                };
+            } catch (error) {
+                log(`✗ Failed to create WebSocket: ${error}`, 'error');
+            }
+        }
+
+        function handleServerMessage(data) {
+            if (data.type === 'csv_files') {
+                log(`📁 Received ${data.files.length} CSV files`, 'success');
+                displayCSVFiles(data.files);
+            } else if (data.type === 'mode_changed') {
+                log(`Mode changed: ${data.mode}`, 'info');
+            } else if (data.type === 'csv_status') {
+                log(`CSV Status: ${data.status}`, 'info');
+            } else if (data.type === 'error') {
+                log(`✗ Error: ${data.message}`, 'error');
+            } else {
+                log(`Received: ${JSON.stringify(data).substring(0, 100)}...`, 'debug');
+            }
+        }
+
+        async function testConnection() {
+            log('Testing connection...', 'debug');
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                log(`✓ Server reachable! Vehicle clients: ${data.vehicle_clients}, Web clients: ${data.web_clients}`, 'success');
+                updateServerStatus(data);
+            } catch (error) {
+                log(`✗ Connection test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function getServerStatus() {
+            log('Fetching server status...', 'debug');
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                log(`Server Status:`, 'info');
+                log(`  - Vehicle clients: ${data.vehicle_clients}`, 'info');
+                log(`  - Web clients: ${data.web_clients}`, 'info');
+                log(`  - Message count: ${data.message_count}`, 'info');
+                updateServerStatus(data);
+                
+                if (data.clients_info && data.clients_info.length > 0) {
+                    data.clients_info.forEach((client, i) => {
+                        log(`  - Client ${i}: ${client.id} (mode: ${client.mode})`, 'info');
+                    });
+                }
+            } catch (error) {
+                log(`✗ Failed to get server status: ${error.message}`, 'error');
+            }
+        }
+
+        function updateServerStatus(data) {
+            const statusDiv = document.getElementById('serverStatus');
+            statusDiv.innerHTML = `
+                Server Status: 
+                <span style="color: #4ec9b0;">${data.vehicle_clients} vehicle(s)</span>, 
+                <span style="color: #569cd6;">${data.web_clients} web client(s)</span>
+            `;
+        }
+
+        async function requestCSVList() {
+            log('→ Requesting CSV list...', 'debug');
+            try {
+                const response = await fetch('/api/csv/request_list', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                if (result.error) {
+                    log(`✗ Request failed: ${result.error}`, 'error');
+                } else {
+                    log(`✓ Request sent to client: ${result.client_id || 'unknown'}`, 'success');
+                    log('Waiting for response via WebSocket...', 'debug');
+                }
+            } catch (error) {
+                log(`✗ Request failed: ${error.message}`, 'error');
+            }
+        }
+
+        function displayCSVFiles(files) {
+            const fileList = document.getElementById('fileList');
+            
+            if (files.length === 0) {
+                fileList.innerHTML = '<p style="color: #858585;">No CSV files found on vehicle.</p>';
+                return;
+            }
+            
+            fileList.innerHTML = files.map(file => `
+                <div class="file-item">
+                    <strong>${file.filename}</strong><br>
+                    <small>Size: ${file.size_mb} MB | Modified: ${new Date(file.modified).toLocaleString()}</small>
+                </div>
+            `).join('');
+            
+            log(`Displayed ${files.length} files in list`, 'success');
+        }
+
+        // Initialize
+        log('=== CSV Debug Tool Started ===', 'info');
+        log('Initializing WebSocket connection...', 'debug');
+        connectWebSocket();
+        
+        // Auto-test connection on load
+        setTimeout(() => {
+            log('Running initial connection test...', 'debug');
+            testConnection();
+        }, 1000);
+    </script>
+</body>
+</html>

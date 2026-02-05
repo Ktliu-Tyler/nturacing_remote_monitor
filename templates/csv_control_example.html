@@ -232,8 +232,11 @@
         }
 
         function handleServerMessage(data) {
+            console.log('[DEBUG] Received message:', data.type, data);
             if (data.type === 'csv_files') {
+                console.log('[DEBUG] Displaying', data.files.length, 'CSV files');
                 displayCSVFiles(data.files);
+                updateStatus(`Received ${data.files.length} CSV files`, 'csv');
             } else if (data.type === 'mode_changed') {
                 updateStatus(`Mode: ${data.mode}${data.file ? ' - ' + data.file : ''}`, 
                            data.mode === 'realtime' ? 'realtime' : 'csv');
@@ -407,22 +410,28 @@
         }
 
         async function requestCSVList() {
+            console.log('[DEBUG] Requesting CSV list...');
             try {
                 const response = await fetch('/api/csv/request_list', {
                     method: 'POST'
                 });
                 const result = await response.json();
+                console.log('[DEBUG] Request result:', result);
                 if (result.error) {
+                    console.error('[ERROR]', result.error);
                     updateStatus('Error: ' + result.error, 'error');
                 } else {
+                    console.log('[DEBUG] Request sent, waiting for response...');
                     updateStatus('Requesting CSV file list...', 'csv');
                 }
             } catch (error) {
+                console.error('[ERROR]', error);
                 updateStatus('Error: ' + error.message, 'error');
             }
         }
 
         function displayCSVFiles(files) {
+            console.log('[DEBUG] displayCSVFiles called with', files.length, 'files');
             const fileList = document.getElementById('fileList');
             
             if (files.length === 0) {
@@ -436,6 +445,7 @@
                     Size: ${file.size_mb} MB | Modified: ${new Date(file.modified).toLocaleString()}
                 </div>
             `).join('');
+            console.log('[DEBUG] File list displayed');
         }
 
         async function selectFile(filename) {

@@ -585,16 +585,18 @@ class CANDataClient:
                 
                 if cmd_type == 'request_csv_list':
                     # 服务器请求CSV文件列表
-                    print("Received request for CSV file list")
+                    print("[DEBUG] Received request for CSV file list")
                     csv_files = self.scan_csv_files()
+                    print(f"[DEBUG] Found {len(csv_files)} CSV files")
                     
                     response = {
                         'type': 'csv_list',
                         'files': csv_files,
                         'count': len(csv_files)
                     }
+                    print(f"[DEBUG] Sending response with {len(csv_files)} files")
                     await self.websocket.send(json.dumps(response))
-                    print(f"Sent {len(csv_files)} CSV files to server")
+                    print(f"[DEBUG] Response sent successfully")
                 
                 elif cmd_type == 'select_csv':
                     # 服务器选择了CSV文件
