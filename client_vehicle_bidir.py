@@ -141,6 +141,10 @@ class CANDataClient:
         """将CAN消息加入队列（智能策略：数据相同去重，不同则保留）"""
         self.total_can_received += 1
         
+        # 📡 網路斷線時直接丟棄資料，不累積歷史資料
+        if not self.websocket:
+            return False
+        
         message_key = (bus_id, can_id)
         data_list = list(data)
         message_data = {
@@ -250,6 +254,8 @@ class CANDataClient:
             while self.running and not self.websocket:
                 await asyncio.sleep(0.1)
             
+            print("✅ Connected - Starting batch sender")
+            
             # 主发送循环
             while self.running:
                 try:
@@ -319,8 +325,18 @@ class CANDataClient:
                             last_send_time = time.time()
                             
                 except (websockets.exceptions.ConnectionClosed, websockets.exceptions.WebSocketException):
-                    # 连接关闭，清空批次
+                    # 連線關閉，清空批次和整個 queue
                     batch = []
+                    queue_size = self.message_queue.qsize()
+                    if queue_size > 0:
+                        print(f"🗑️  Connection lost - Discarding {queue_size} queued messages")
+                        # 清空 queue，不保留斷線期間的資料
+                        while not self.message_queue.empty():
+                            try:
+                                self.message_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                    print("⚠️  Batch sender stopped - waiting for reconnection")
                     break
                 except asyncio.CancelledError:
                     print("Batch sender: Task cancelled", flush=True)
@@ -336,18 +352,19 @@ class CANDataClient:
             traceback.print_exc()
     
     async def read_can0(self):
-        """读取CAN0数据"""
+        """读取CAN0数据（持續運作，不受網路連線影響）"""
         loop = asyncio.get_event_loop()
         while self.running:
             try:
-                # 只在realtime模式下读取CAN
-                if self.mode == 'realtime' and self.bus0 and self.websocket:
+                # 只在realtime模式下读取CAN（網路斷線也繼續讀取）
+                if self.mode == 'realtime' and self.bus0:
                     # 使用线程池执行阻塞的recv调用
                     message = await loop.run_in_executor(
                         None,  # 使用默认线程池
                         lambda: self.bus0.recv(timeout=0.01)
                     )
                     if message:
+                        # send_can_message 內部會檢查連線狀態
                         await self.send_can_message(
                             message.arbitration_id,
                             message.data,
@@ -507,18 +524,19 @@ class CANDataClient:
             traceback.print_exc()
     
     async def read_can1(self):
-        """读取CAN1数据"""
+        """读取CAN1数据（持續運作，不受網路連線影響）"""
         loop = asyncio.get_event_loop()
         while self.running:
             try:
-                # 只在realtime模式下读取CAN
-                if self.mode == 'realtime' and self.bus1 and self.websocket:
+                # 只在realtime模式下读取CAN（網路斷線也繼續讀取）
+                if self.mode == 'realtime' and self.bus1:
                     # 使用线程池执行阻塞的recv调用
                     message = await loop.run_in_executor(
                         None,  # 使用默认线程池
                         lambda: self.bus1.recv(timeout=0.01)
                     )
                     if message:
+                        # send_can_message 內部會檢查連線狀態
                         await self.send_can_message(
                             message.arbitration_id,
                             message.data,
@@ -796,7 +814,17 @@ class CANDataClient:
                             pass
                     self.websocket = None
                     
-                    print(f"Reconnecting in {RECONNECT_DELAY} seconds...")
+                    # 清空 queue，避免重連時發送舊資料
+                    queue_size = self.message_queue.qsize()
+                    if queue_size > 0:
+                        print(f"🗑️  Clearing {queue_size} old messages before reconnect")
+                        while not self.message_queue.empty():
+                            try:
+                                self.message_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                    
+                    print(f"🔄 Reconnecting in {RECONNECT_DELAY} seconds...")
                     await asyncio.sleep(RECONNECT_DELAY)
     
     def shutdown(self):
