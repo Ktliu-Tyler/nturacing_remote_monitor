@@ -24,8 +24,8 @@ import os
 import websockets
 
 # Configuration
-WEB_PORT = 8888  # 网页服务端口
-DATA_PORT = 8889  # 接收车辆数据的端口
+WEB_PORT = 8888  # Web service port
+DATA_PORT = 8889  # Port for receiving vehicle data
 DIRBASE = "../LOGS/"
 
 app = FastAPI()
@@ -51,9 +51,9 @@ class RemoteCANServer:
         # Connection status
         self.vehicle_connected = False
         self.last_data_time = None
-        self.connection_timeout = 3.0  # 3秒没有数据则判定断线
+        self.connection_timeout = 3.0  # Mark disconnected after 3 seconds without data
         
-        # Data storage (相同的数据结构)
+        # Data storage (same structure)
         self.data_store = {
             'timestamp': {'time': None, 'last_update': None},
             'gps': {
@@ -137,24 +137,24 @@ class RemoteCANServer:
         self.message_count = 0
         self.running = True
         
-        # Legacy GPS数据暂存
+        # Temporary storage for legacy GPS data
         self.gps_lat = None
         self.gps_lon = None
         self.gps_alt = None
         
-        # Position covariance 暂存
+        # Temporary storage for position covariance
         self.position_covariance = [0.0] * 9
         self.position_covariance_type = 0
         
         print("Remote CAN Server initialized")
 
     def check_vehicle_connection(self):
-        """检查车辆连接状态"""
+        """Check vehicle connection status."""
         if not vehicle_clients:
             self.vehicle_connected = False
             return False
         
-        # 检查是否有最近的数据更新
+        # Check whether there was a recent data update
         if self.last_data_time is not None:
             time_since_update = time.time() - self.last_data_time
             if time_since_update > self.connection_timeout:
@@ -164,12 +164,12 @@ class RemoteCANServer:
                 self.vehicle_connected = True
                 return True
         else:
-            # 有客户端但还没有数据，暂时认为是连接的
+            # Client is connected but no data yet; treat as connected for now
             self.vehicle_connected = bool(vehicle_clients)
             return self.vehicle_connected
 
     async def handle_vehicle_client(self, websocket):
-        """处理来自车辆的连接"""
+        """Handle incoming connection from a vehicle client."""
         client_id = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         print(f"Vehicle client connected: {client_id}")
         
@@ -186,57 +186,57 @@ class RemoteCANServer:
                     data = json.loads(message)
                     
                     if data['type'] == 'can_message':
-                        # 处理单条CAN消息（向后兼容）
+                        # Handle a single CAN message (backward compatible)
                         can_id = data['can_id']
                         can_data = bytes(data['data'])
                         bus_id = data.get('bus_id', 0)
                         
-                        # 创建模拟CAN消息对象
+                        # Build a mock CAN message object
                         mock_message = self.create_mock_can_message(can_id, can_data)
                         self.process_can_message(mock_message)
                         self.message_count += 1
                         vehicle_clients[client_id]['message_count'] += 1
                         
-                        # 更新最后数据接收时间
+                        # Update last data receive time
                         self.last_data_time = time.time()
                         self.vehicle_connected = True
                     
                     elif data['type'] == 'can_batch':
-                        # 处理批量CAN消息
+                        # Handle batched CAN messages
                         messages = data.get('messages', [])
                         for msg in messages:
                             can_id = msg['can_id']
                             can_data = bytes(msg['data'])
                             bus_id = msg.get('bus_id', 0)
                             
-                            # 创建模拟CAN消息对象
+                            # Build a mock CAN message object
                             mock_message = self.create_mock_can_message(can_id, can_data)
                             self.process_can_message(mock_message)
                             self.message_count += 1
                             vehicle_clients[client_id]['message_count'] += 1
                         
-                        # 更新最后数据接收时间
+                        # Update last data receive time
                         self.last_data_time = time.time()
                         self.vehicle_connected = True
                         
                     elif data['type'] == 'heartbeat':
-                        # 更新心跳时间
+                        # Update heartbeat time
                         vehicle_clients[client_id]['last_heartbeat'] = time.time()
                         vehicle_clients[client_id]['mode'] = data.get('mode', 'realtime')
                         vehicle_clients[client_id]['csv_file'] = data.get('csv_file')
                         
-                        # 打印统计信息
+                        # Print drop/queue statistics
                         if 'dropped_messages' in data and data['dropped_messages'] > 0:
                             print(f"Client {client_id}: Dropped {data['dropped_messages']} messages, Queue: {data.get('queue_size', 0)}")
                     
                     elif data['type'] == 'csv_list':
-                        # 接收CSV文件列表
+                        # Receive CSV file list
                         files_count = data.get('count', 0)
                         print(f"[DEBUG] Received CSV file list: {files_count} files")
                         print(f"[DEBUG] Files: {[f.get('filename', 'unknown') for f in data.get('files', [])[:5]]}")
                         vehicle_clients[client_id]['csv_files'] = data.get('files', [])
                         
-                        # 广播到所有web客户端
+                        # Broadcast to all web clients
                         print(f"[DEBUG] Broadcasting to {len(web_connections)} web clients")
                         await self.broadcast_to_web({
                             'type': 'csv_files',
@@ -246,7 +246,7 @@ class RemoteCANServer:
                         print("[DEBUG] Broadcast completed")
                     
                     elif data['type'] == 'mode_changed':
-                        # 模式切换确认
+                        # Confirm mode switch
                         print(f"Mode changed to: {data.get('mode')} for {client_id}")
                         vehicle_clients[client_id]['mode'] = data.get('mode')
                         
@@ -258,7 +258,7 @@ class RemoteCANServer:
                         })
                     
                     elif data['type'] == 'csv_status':
-                        # CSV回放状态更新
+                        # CSV playback status update
                         print(f"CSV status: {data.get('status')}")
                         await self.broadcast_to_web({
                             'type': 'csv_status',
@@ -267,7 +267,7 @@ class RemoteCANServer:
                         })
                     
                     elif data['type'] == 'csv_progress':
-                        # CSV回放進度更新
+                        # CSV playback progress update
                         await self.broadcast_to_web({
                             'type': 'csv_progress',
                             'percentage': data.get('percentage', 0),
@@ -278,7 +278,7 @@ class RemoteCANServer:
                         })
                     
                     elif data['type'] == 'error':
-                        # 错误消息
+                        # Error message
                         print(f"Error from client: {data.get('message')}")
                         await self.broadcast_to_web({
                             'type': 'error',
@@ -297,7 +297,7 @@ class RemoteCANServer:
                 del vehicle_clients[client_id]
 
     def create_mock_can_message(self, can_id, data):
-        """创建模拟的CAN消息对象"""
+        """Create a mock CAN message object."""
         class MockCanMessage:
             def __init__(self, arbitration_id, data):
                 self.arbitration_id = arbitration_id
@@ -306,7 +306,7 @@ class RemoteCANServer:
         return MockCanMessage(can_id, data)
 
     async def broadcast_to_web(self, data):
-        """广播消息到所有Web客户端"""
+        """Broadcast a message to all web clients."""
         if not web_connections:
             return
         
@@ -322,18 +322,18 @@ class RemoteCANServer:
                 web_connections.remove(ws)
     
     async def broadcaster_loop(self):
-        """定期广播数据到网页客户端"""
+        """Periodically broadcast data to web clients."""
         while self.running:
             if web_connections:
                 await self.broadcast_data()
             await asyncio.sleep(0.05)  # 20 FPS
 
     async def broadcast_data(self):
-        """广播数据到所有网页客户端"""
+        """Broadcast telemetry data to all web clients."""
         if not web_connections:
             return
         
-        # 检查连接状态
+        # Refresh vehicle connection status
         self.check_vehicle_connection()
             
         broadcast_data = {
@@ -354,7 +354,7 @@ class RemoteCANServer:
             'last_data_time': self.last_data_time
         }
         
-        # 发送到所有网页客户端
+        # Send to all web clients
         disconnected = []
         for websocket in web_connections:
             try:
@@ -362,19 +362,19 @@ class RemoteCANServer:
             except:
                 disconnected.append(websocket)
         
-        # 移除断开的连接
+        # Remove disconnected clients
         for ws in disconnected:
             if ws in web_connections:
                 web_connections.remove(ws)
 
-    # 从这里开始，复制所有的decode函数
+    # Decode functions copied below
     def process_can_message(self, msg):
-        """处理CAN消息 - 与原来的代码相同"""
+        """Process CAN message (same behavior as original code)."""
         can_id = msg.arbitration_id
         data = msg.data
         
         try:
-            # Timestamp 解码
+            # Timestamp decode
             if can_id == 0x100:
                 self.decode_timestamp(data)
             
@@ -382,7 +382,7 @@ class RemoteCANServer:
                 self.decode_vcu_cockpit(data)
             elif can_id == 0x381:
                 self.decode_vcu_suspension(data)
-            # GPS 解码
+            # GPS decode
             elif can_id == 0x400:
                 self.decode_gps_basic(data)
             elif can_id == 0x401:
@@ -392,7 +392,7 @@ class RemoteCANServer:
             elif can_id == 0x419:
                 self.decode_position_covariance_type(data)
                 
-            # 速度资料解码
+            # Velocity decode
             elif can_id == 0x402:
                 self.decode_velocity_x(data)
             elif can_id == 0x403:
@@ -410,7 +410,7 @@ class RemoteCANServer:
             elif can_id == 0x440:
                 self.decode_distance(data)
             
-            # Accumulator 解码
+            # Accumulator decode
             elif can_id == 0x601:
                 self.decode_cell_voltage(data)
             elif can_id == 0x651:
@@ -422,7 +422,7 @@ class RemoteCANServer:
             elif can_id == 0x511:
                 self.decode_accumulator_state(data)
             
-            # Inverter 解码
+            # Inverter decode
             elif 0x191 <= can_id <= 0x194:
                 inv_num = can_id - 0x190
                 self.decode_inverter_status(data, inv_num)
@@ -439,7 +439,7 @@ class RemoteCANServer:
                 inv_num = can_id - 0x210
                 self.decode_inverter_control(data, inv_num)
             
-            # IMU 解码
+            # IMU decode
             elif can_id == 0x185:
                 self.decode_imu_accel_km6(data)
             elif can_id == 0x426:
@@ -451,7 +451,7 @@ class RemoteCANServer:
             elif can_id == 0x429:
                 self.decode_imu_mag(data)
             
-            # IMU2 解码
+            # IMU2 decode
             elif can_id == 0x188:
                 self.decode_imu2_accel(data)
             elif can_id == 0x288:
@@ -459,7 +459,7 @@ class RemoteCANServer:
             elif can_id == 0x488:
                 self.decode_imu2_quaternion(data)
             
-            # Xsens IMU 解码
+            # Xsens IMU decode
             elif can_id == 0x021:
                 self.decode_xsens_quaternion(data)
             elif can_id == 0x031:
@@ -482,7 +482,7 @@ class RemoteCANServer:
         except Exception as e:
             print(f"Failed to decode CAN message ID 0x{can_id:03X}: {e}")
 
-    # 所有decode函数（与原代码相同）
+    # All decode functions (same as original code)
     def decode_timestamp(self, data):
         if len(data) >= 6:
             ms_since_midnight = struct.unpack('<I', data[0:4])[0]
@@ -1138,12 +1138,12 @@ async def get_data():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """处理网页客户端的WebSocket连接"""
+    """Handle WebSocket connections from web clients."""
     await websocket.accept()
     web_connections.append(websocket)
     print('Web client connected')
     
-    # 连线时主动推送一次资料
+    # Push one snapshot immediately after connection
     if can_server:
         await can_server.broadcast_data()
     
@@ -1158,7 +1158,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get('/api/status')
 async def get_status():
-    """获取服务器状态"""
+    """Get current server status."""
     return {
         'vehicle_clients': len(vehicle_clients),
         'web_clients': len(web_connections),
@@ -1178,14 +1178,14 @@ async def get_status():
 
 @app.post('/api/csv/request_list')
 async def request_csv_list():
-    """请求车辆端发送CSV文件列表"""
+    """Request CSV file list from vehicle client."""
     print(f"[DEBUG] CSV list requested. Vehicle clients: {len(vehicle_clients)}")
     
     if not vehicle_clients:
         print("[ERROR] No vehicle client connected")
         return {'error': 'No vehicle client connected'}
     
-    # 发送命令到第一个连接的车辆客户端
+    # Send command to the first connected vehicle client
     client_id = list(vehicle_clients.keys())[0]
     websocket = vehicle_clients[client_id]['websocket']
     
@@ -1203,7 +1203,7 @@ async def request_csv_list():
 
 @app.post('/api/csv/select')
 async def select_csv_file(request: Request):
-    """选择CSV文件进行回放"""
+    """Select a CSV file for playback."""
     data = await request.json()
     filename = data.get('filename')
     
@@ -1227,15 +1227,15 @@ async def select_csv_file(request: Request):
 
 @app.post('/api/csv/switch_realtime')
 async def switch_to_realtime():
-    """切換回實時模式並清空buffer"""
+    """Switch back to realtime mode and clear buffers."""
     if not vehicle_clients:
         return {'error': 'No vehicle client connected'}
     
-    # 清空所有數據buffer
+    # Clear all data buffers
     if can_server:
         print("🧹 Clearing data buffer before switching to realtime mode...")
         
-        # 重置所有數據為None
+        # Reset all stored values to None
         can_server.data_store['timestamp']['time'] = None
         can_server.data_store['timestamp']['last_update'] = None
         
@@ -1323,7 +1323,7 @@ async def switch_to_realtime():
 
 @app.post('/api/csv/pause')
 async def toggle_csv_pause():
-    """暫停/恢復CSV回放"""
+    """Pause or resume CSV playback."""
     if not vehicle_clients:
         return {'error': 'No vehicle client connected'}
     
@@ -1340,7 +1340,7 @@ async def toggle_csv_pause():
 
 @app.post('/api/csv/jump_percentage')
 async def jump_to_percentage(request: Request):
-    """跳到指定百分比位置"""
+    """Jump to a specified percentage position."""
     data = await request.json()
     percentage = data.get('percentage', 0)
     
@@ -1367,7 +1367,7 @@ async def jump_to_percentage(request: Request):
 
 @app.post('/api/csv/jump_time')
 async def jump_time(request: Request):
-    """前進或後退指定秒數"""
+    """Jump forward or backward by a given number of seconds."""
     data = await request.json()
     seconds = data.get('seconds', 0)
     
@@ -1394,7 +1394,7 @@ async def jump_time(request: Request):
 
 @app.post('/api/csv/set_speed')
 async def set_playback_speed(request: Request):
-    """設定回放速度"""
+    """Set playback speed."""
     data = await request.json()
     speed = data.get('speed', 1.0)
     
@@ -1420,21 +1420,21 @@ async def set_playback_speed(request: Request):
         return {'error': str(e)}
 
 async def start_vehicle_data_server():
-    """启动车辆数据接收服务器"""
+    """Start the vehicle data receiver server."""
     global can_server
     can_server = RemoteCANServer()
     
-    # 启动broadcaster循环
+    # Start broadcaster loop
     broadcaster_task = asyncio.create_task(can_server.broadcaster_loop())
     
-    # 启动WebSocket服务器接收车辆数据
+    # Start WebSocket server to receive vehicle data
     async with websockets.serve(can_server.handle_vehicle_client, "0.0.0.0", DATA_PORT):
         print(f"Vehicle data server listening on port {DATA_PORT}")
         await broadcaster_task
 
 @app.on_event("startup")
 async def startup_event():
-    """应用启动事件"""
+    """Application startup event."""
     asyncio.create_task(start_vehicle_data_server())
 
 if __name__ == '__main__':
